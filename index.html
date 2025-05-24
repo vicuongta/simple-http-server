@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Discordn't Web App</title>
+    <style>
+        table {
+            margin-top: 5px;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            border: 1px solid black;
+            padding: 5px;
+            text-align: left;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="title">
+        <p>Discordn't Web App:</p>
+    </div>
+    <div id="login-container" style="display: block;">
+        <input type="text" id="username" required>
+        <button id="login" onclick="sendLoginData(); toggleVisibility('login-container', 'chat')">login</button>
+    </div>
+    <div id="chat" style="display: none;">
+        What's on your mind?
+        <div style="display: flex">
+            <input type="text" id="message">
+            <div id="button" style="margin-left: 5px;">
+                <button onclick="sendNewMessage()" id="sendData">Send it!</button>
+                <button onclick="sendLogoutRequest(); toggleVisibility('chat', 'login-container')" id="logout">Log
+                    out!</button>
+            </div>
+        </div>
+        <table id="message-table">
+            <thead>
+                <th>User</th>
+                <th>Message</th>
+            </thead>
+            <tbody>
+                <!-- Rows will be added here dynamically -->
+            </tbody>
+        </table>
+    </div>
+    <script>
+
+        const URL = 'api/';
+
+        const path = {
+            messages: 'messages',
+            login: 'login',
+            latest_message: 'message?last='
+        };
+
+        let latest_message = '';
+        let latest_time = 0;
+        let intervalId;
+
+        let current_time = ''
+
+        window.onload = function () {
+            checkLoginStatus();
+        };
+
+        // --------------- Handle HTTP Requests --------------- //
+
+        const sendHttpRequest = (method, url, data) => {
+            return new Promise((resolve, reject) => {  // Properly define reject
+                const xhr = new XMLHttpRequest();
+                xhr.open(method, url);
+                xhr.withCredentials = true;
+                xhr.setRequestHeader('Content-Type', 'application/json');
+
+                xhr.onload = () => {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        try {
+                            // Check if the response is not empty
+                            const response = xhr.responseText;
+                            resolve(response ? JSON.parse(response) : null); // Handle empty response
+                        } catch (error) {
+                            reject(`JSON parse error: ${error.message}`);
+                        }
+                    } else {
+                        reject(`Error: ${xhr.status} - ${xhr.statusText}`);
+                    }
+                };
+
+                xhr.onerror = () => {
+                    reject('Network error');
+                };
+
+                // Only stringify data if it's not undefined or null and method allows it
+                if (data && method === 'POST') {
+                    xhr.send(JSON.stringify(data));
+                } else {
+                    xhr.send(); // Send without data for DELETE and GET
+                }
+            });
+        };
+
+        const getCookie = (name) => {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+        }
+
+        // Fetch message when another browser opens for the same user
+        // Browser will track cookie for us
+        const checkLoginStatus = () => {
+            const username = getCookie('username');
+            if (username) {
+                toggleVisibility('login-container', 'chat')
+                // First retrieve all messages
+                sendHttpRequest('GET', URL + path.latest_message + '0').then(response => {
+                    console.log('response', response);
+                    fetchMessage(response); // Fetch messages after this timestamp
+                    current_time = localStorage.getItem('latest-message');
+                })
+            }
+        }
+
+        // Method to set a cookie
+        const setCookie = (name, value) => {
+            document.cookie = `${name}=${value}; path=/`;
+        };
+
+        // Method to send login data to the server
+        const sendLoginData = async () => {
+            const username = document.getElementById('username').value;
+            setCookie('username', username);
+
+            try {
+                await sendHttpRequest('POST', URL + path.login);
+                const response = await sendHttpRequest('GET', URL + path.messages);
+                fetchMessage(response); // Display all messages and retrieve timestamp for last message (latest_time)
+
+                latest_message = response[response.length - 1] // store latest message
+                console.log('latest message', latest_message);
+                latest_time = JSON.stringify(latest_message.message).split(': ')[1].replace(/^"|"$/g, '');
+                localStorage.setItem('latest-time', latest_time)
+                // console.log('latest-time', localStorage.getItem('latest-time'));
+            } catch (error) {
+                console.log('Error:', error);
+            }
+        };
+
+        // Method to send message to the server
+        // const sendNewMessage = async () => {
+        //     const message = document.getElementById('message').value;
+        //     const timestamp = Date.now()
+        //     const data = { 'message': message + ' - ' + timestamp };
+
+        //     try {
+        //         await sendHttpRequest('POST', URL + path.messages, data);
+        //         const response = await sendHttpRequest('GET', URL + path.latest_message + timestamp);
+        //         console.log('response', response);
+        //         latest_message = response[response.length - 1] // store latest message
+        //         msg_time = JSON.stringify(latest_message.message).split(': ')[1].replace(/^"|"$/g, ''); // retrieve timestamp of latest message
+        //         console.log('msg_time', msg_time);
+        //         console.log('latest-time', latest_time);
+        //         if (msg_time >= latest_time) {
+        //             fetchMessage(response); // Fetch messages after this timestamp
+        //         }
+        //         else {
+        //             setInterval(sendHttpRequest('GET', URL + path.latest_message+latest_time), 1000);
+        //         }
+        //     } catch (error) {
+        //         console.log('Error:', error);
+        //     }
+        // };
+        const sendNewMessage = () => {
+            const message = document.getElementById('message').value;
+            let timestamp = Date.now();
+            const data = { 'message': message + ': ' + timestamp };
+
+            try {
+
+                sendHttpRequest('POST', URL + path.messages, data);
+                console.log('Message sent:', data['message']);
+
+                if (intervalId) {
+                    clearInterval(intervalId);
+                }
+
+                intervalId = setInterval(() => {
+                    const request_time = Number(timestamp) > Number(localStorage.getItem('latest-time')) ? timestamp : localStorage.getItem('latest-time')
+                    if (Number(timestamp) < Number(localStorage.getItem('latest-time'))) {
+                        timestamp = localStorage.getItem('latest-time')+1;
+                    }
+                    sendHttpRequest('GET', URL + path.latest_message + timestamp).then(response => {
+                        console.log('response', response);
+                        console.log('timestamp', Number(timestamp));
+                        console.log('time in local', Number(localStorage.getItem('latest-time')));
+                        // Kiểm tra timestamp của message mới gửi có lớn hơn timestamp lưu trong localstorage                   
+                        if (Number(timestamp) > Number(localStorage.getItem('latest-time'))) {
+                            fetchMessage(response) // in dòng mới lên web
+                            localStorage.setItem('latest-time', parseInt(request_time)); // Cập nhật timestamp trong local storage
+                        }
+                    });
+                }, 1000);
+            } catch (error) {
+                console.log('Error:', error);
+            }
+        };
+
+        const sendLogoutRequest = () => {
+            document.cookie = "username=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT;";
+            sendHttpRequest('DELETE', URL + path.login).then(response => {
+                console.log('Cookie Deleted! User Logged Out');
+                toggleVisibility('chat', 'login-container');
+                clearMessageTable();
+                if (intervalId) {
+                    clearInterval(intervalId);
+                }
+            }).catch(error => {
+                console.log('Error:', error);
+            })
+        }
+
+        // ---------------- Display ---------------- //
+
+        const toggleVisibility = (hideId, showId) => {
+            const hideElement = document.getElementById(hideId);
+            const showElement = document.getElementById(showId);
+            hideElement.style.display = 'none';
+            showElement.style.display = 'block';
+        };
+
+        const fetchMessage = (response) => {
+            const messageTable = document.getElementById('message-table');
+            const tableBody = messageTable.getElementsByTagName('tbody')[0];
+
+            response.forEach((msg) => {
+                const newRow = tableBody.insertRow();
+                const nameCell = newRow.insertCell(0);
+                const messageCell = newRow.insertCell(1);
+
+                nameCell.textContent = msg.user;
+                messageCell.textContent = msg.message.split(': ')[0];
+            });
+        };
+
+        const clearMessageTable = () => {
+            const messageTable = document.getElementById('message-table');
+            const tableBody = messageTable.getElementsByTagName('tbody')[0];
+
+            // Clear all rows from the table body
+            while (tableBody.rows.length > 0) {
+                tableBody.deleteRow(0);
+            }
+        };
+    </script>
+</body>
+
+</html>
