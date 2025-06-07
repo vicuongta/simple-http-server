@@ -50,7 +50,3 @@ curl -X POST -d "name=TestUser" http://localhost:8080
 - Add support for serving multiple file types
 - Implement routing for different endpoints
 - Add concurrency with threading
-
-## 📄 License
-
-This project is licensed under the MIT License.
